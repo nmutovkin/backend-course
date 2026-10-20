@@ -102,6 +102,16 @@ Coverage check against roadmap.sh: [`ROADMAP_COVERAGE.md`](./ROADMAP_COVERAGE.md
 
 ---
 
+## How deep we go
+
+About 450 hours. Each sub-topic in the syllabus has a depth tag:
+
+- **`L3` Internals:** built from scratch first, then the real tool. Reserved for what backend engineers get paged for: TCP/HTTP, SQL & transactions, concurrency & idempotency, caching, auth, API design, observability, resilience.
+- **`L2` Production:** used for real in Gatepass, with failure labs. Most tools: Redis, Kafka, gRPC, GraphQL, Docker, Kubernetes (developer side), Terraform, cloud.
+- **`L1` Awareness:** what it is, when to choose it, trade-offs. Examples: SOAP, SAML, Cassandra, Paxos, service mesh.
+
+Target outcome: a strong mid-level engineer heading toward senior. Details and the list of from-scratch builds are in [`SYLLABUS.md`](./SYLLABUS.md#depth-levels).
+
 ## How every module is structured
 
 Each module (to be written under `modules/NN-name/`) follows the same shape:

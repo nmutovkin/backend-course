@@ -121,7 +121,7 @@ gives a reason to.
 
 ```
 gatepass/
-├── cmd/                 # entry points: api, worker, payments, realtime, cli
+├── cmd/                 # entry points: api, worker, payments, realtime, gatepass (CLI), gpcurl
 ├── internal/
 │   ├── identity/
 │   ├── catalog/

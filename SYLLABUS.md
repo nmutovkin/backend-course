@@ -62,7 +62,7 @@ clusters as an admin; cloud certification detail.
    - Domain names, registrars, hosting types (shared, VPS, cloud, serverless)
    - CDN overview
 
-**Labs:** capture a full page load in Wireshark; write an HTTP request by hand with `nc`/`telnet`; resolve a domain recursively with `dig +trace`; measure TTFB with `curl -w`.
+**Labs:** capture the TCP handshake with tcpdump/Wireshark; write an HTTP request by hand with `nc`; resolve a domain recursively with `dig +trace`; compare timings with `curl -w`; build `gpdig`, a DNS client from raw UDP packets (stretch); exhaust ephemeral ports with TIME_WAIT; add RTT with `tc netem`.
 
 **Across languages:** every language wraps the same BSD socket API: `net` (Go), `socket` (Python), `net` (Node), `java.net`/NIO, `System.Net.Sockets`, `std::net` (Rust).
 

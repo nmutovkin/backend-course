@@ -112,9 +112,18 @@ About 450 hours. Each sub-topic in the syllabus has a depth tag:
 
 Target outcome: a strong mid-level engineer heading toward senior. Details and the list of from-scratch builds are in [`SYLLABUS.md`](./SYLLABUS.md#depth-levels).
 
+## Repository layout
+
+```
+modules/NN-slug/README.md   the lessons (written in order; see docs/LEDGER.md for status)
+gatepass/                   the project's reference implementation (one Go module)
+docs/AUTHORING.md           how modules are written and kept consistent
+docs/LEDGER.md              what has been built, defined, decided and promised so far
+```
+
 ## How every module is structured
 
-Each module (to be written under `modules/NN-name/`) follows the same shape:
+Each module under `modules/NN-slug/` follows the same shape:
 
 1. **Why this exists**: the problem, told through Gatepass.
 2. **Concepts**: language-agnostic explanation, diagrams, trade-offs.

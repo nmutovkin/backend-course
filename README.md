@@ -39,12 +39,13 @@ See [`PROJECT.md`](./PROJECT.md) for the full specification and per-module miles
 
 ## Course map
 
-The course is split into **6 parts** and **32 modules**.
+The course is split into **6 parts** and **33 modules** (00–32).
 Full breakdown with every sub-topic: [`SYLLABUS.md`](./SYLLABUS.md).
 
 ### Part I: Foundations
 | #  | Module                                  | Gatepass milestone                                  |
 |----|-----------------------------------------|-----------------------------------------------------|
+| 00 | Setup & Go Primer                       | Environment ready; Gatepass tests pass              |
 | 01 | How the Internet Works                  | Hand-craft HTTP requests; trace DNS → TCP → TLS     |
 | 02 | Operating Systems & Linux               | `gatepass` CLI, signals, graceful shutdown           |
 | 03 | The Programming Language                | In-memory domain model: events, venues, seats       |
@@ -137,9 +138,17 @@ Each module under `modules/NN-slug/` follows the same shape:
 
 ## Prerequisites
 
-- Comfortable writing basic programs in at least one language.
+- Comfortable writing basic programs in at least one language. Go is taught
+  in the course (Module 00 primer, Module 03 in depth).
 - A machine (or VM) running Linux or macOS, or Windows with WSL2.
-- Docker installed by Part III. Earlier modules need only a compiler and a terminal.
+- Docker from Module 07 on. Module 00 walks through installing everything.
+
+## Self-contained by design
+
+Everything you need to finish every module (concepts, protocol details, tool
+installation, lab steps, expected output, and answers to every question) is
+in the course itself. Books, RFCs and articles are listed only as optional
+further reading.
 
 ## Why Go as the reference language?
 

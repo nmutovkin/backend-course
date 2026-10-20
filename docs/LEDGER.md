@@ -8,7 +8,8 @@ actually in the repository.
 
 | #  | Module                      | Status  | Notes |
 |----|-----------------------------|---------|-------|
-| 01 | How the Internet Works      | ✅ Done | `gpcurl` + `httpwire` (response side) |
+| 00 | Setup & Go Primer           | ✅ Done | Environment, tool installs, Go basics; no milestone code |
+| 01 | How the Internet Works      | ✅ Done | `gpcurl` + `httpwire` (response side); self-contained labs with real captured output |
 | 02 | Operating Systems & Linux   | ⏭ Next | |
 | 03–32 | …                        | Planned | |
 
@@ -36,6 +37,16 @@ A term may be used freely after the module that defines it.
 
 | Term(s)                                                        | Defined in |
 |----------------------------------------------------------------|------------|
+| Terminal basics (`pwd ls cd mkdir cat sudo`, `&`, Ctrl+C), `PATH`, `$` prompt convention | M00 §2.2–2.3 |
+| Go: module/`go.mod`, package `main`, imports, stdlib, `:=`/`var`/`const`, zero values, basic types, explicit conversion, slices/`append`/`make`, maps, structs, exported vs unexported names | M00 §3.1–3.3 |
+| Go: multiple results, `error`, sentinel errors, `fmt.Errorf` + `%w`, `errors.Is`, `_` | M00 §3.4 |
+| Go: pointers, methods, value vs pointer receivers                | M00 §3.5   |
+| Go: interfaces (implicit), `io.Reader`/`io.Writer`, `io.EOF`, wrapping readers, `bufio` | M00 §3.6 |
+| Go: `defer`, packages & `internal/`, `cmd/<name>` layout         | M00 §3.7–3.8 |
+| Go: `context.Context` (timeouts only; goroutines/channels only named) | M00 §3.9 |
+| Go: tests, `t.Run`, `t.Errorf` vs `t.Fatalf`, table-driven tests, race detector (named), `go run/build/test/vet`, `gofmt` | M00 §3.10–3.11 |
+| Big-endian / network byte order, DNS wire format (header flags, RCODEs, label encoding, type codes, RR layout, name compression), TCP DNS length prefix | M01 §3.2 |
+| Reading `tcpdump` output (flags `S . P F R`, seq ranges), `ss`, `dig` output, `curl -w`, `tc netem` | M01 §6 |
 | RTT, TTFB                                                      | M01 §1, §4.1 |
 | TCP/IP & OSI layers, L4 vs L7, encapsulation                    | M01 §2.1   |
 | IPv4/IPv6, CIDR, private ranges, loopback, link-local, NAT, BGP, traceroute/TTL, MAC/ARP | M01 §2.2 |
@@ -58,6 +69,14 @@ target module, or moved here with a reason.
 
 | Target | Promise                                                              | Made in |
 |--------|----------------------------------------------------------------------|---------|
+| 02     | Shell taught properly (M00 gave only the minimum); file descriptors as the real per-connection limit | M00 §2.2, M01 checkpoint 2 |
+| 03     | Go in depth (`L3`): goroutines, channels, contexts properly, races   | M00 §3.9, §3.11 |
+| 05     | Status codes in full, incl. redirect semantics (301/302/303/307/308)  | M01 §7   |
+| 05     | Our server is strict: rejects HTTP/1.1 requests without `Host` (400)  | M01 Lab 2 |
+| 06     | Why floats are wrong for money                                       | M00 §3.2 |
+| 07     | Uses Docker (installed in M00 §2.5) to run PostgreSQL; explain just enough `docker run` | M00 §2.5 |
+| 10     | Uses Docker for Testcontainers                                       | M00 §2.5 |
+| 23     | Containers explained in depth                                        | M00 §2.5 |
 | 05     | HTTP semantics: methods, status codes, headers, cookies               | M01 §2.5 |
 | 05     | `httpwire` gains request parsing for our own server, with the same limits (8 KiB lines, 100 fields) | M01 §4, §4.2 |
 | 07     | Connection pooling (DB); reuse rationale from M01 §1                  | M01 §1   |
@@ -104,7 +123,10 @@ Go module `github.com/nmutovkin/backend-course/gatepass`, Go 1.24.
 | Parsers enforce size limits and reject ambiguous input                | M01 §4.2 |
 | Errors are prefixed or wrapped with the phase or step that failed     | M01 §4.2 |
 | CLI tools: data on stdout, diagnostics on stderr                      | M01 §4.2 |
-| Lab solutions are not committed; extension tasks stay out of reference code | AUTHORING |
+| Lab solution code is not committed as files; short solutions/answers in `<details>`; extension tasks stay out of reference code | AUTHORING |
+| **Modules are self-contained**: no external source is required; tools installed in M00 §2.3 (extend that table); labs show real output; every question answered | AUTHORING, after M01 |
+| Lab conventions: local server `python3 -m http.server 8099` serving `/tmp/www`; `gpcurl` built to `/tmp/gpcurl`; scratch Go work in `~/goplay/<name>` | M01 §6 |
+| Course OS baseline: Ubuntu 24.04 (native, WSL2, or container on macOS); Fedora/macOS equivalents given | M00 §2.1 |
 
 ## 7. Deviations from the plan
 
@@ -112,9 +134,14 @@ Go module `github.com/nmutovkin/backend-course/gatepass`, Go 1.24.
 |--------|-----------|---------------------|
 | 01     | 7 labs instead of the 4 listed (added `gpdig` DNS stretch lab, TIME_WAIT lab, netem RTT lab) | ✅ SYLLABUS |
 | 01     | `gpcurl` lives in `cmd/gpcurl` (layout listed only api/worker/…) | ✅ PROJECT §4 |
+| 00     | New Module 00 (Setup & Go Primer) added so Modules 01–02 don't depend on outside Go knowledge | ✅ SYLLABUS, README |
+| 00     | Docker now required from Module 07 (README had said Part III) | ✅ README |
 
 ## 8. Notes for upcoming modules
 
+- **M02:** M00 §2.2 taught only minimal shell; M02 §1 is the full treatment.
+  `strace`, `lsof`, `ss` are already installed (M00 §2.3); add any new tool
+  (e.g. `htop`) to that table. The lab server convention from M01 §6 can be reused.
 - **M02:** the `gatepass` CLI (`cmd/gatepass`) is separate from `gpcurl`.
   Labs 1, 6 and 7 of M01 used `tcpdump`, `ss`, `tc`; M02 can build on them
   (`ss`, `lsof` appear in M02 §6). M01 §3.1 described TIME_WAIT; M02 §4 (file

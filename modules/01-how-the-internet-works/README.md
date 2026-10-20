@@ -8,6 +8,9 @@
 > shows where every millisecond of a request goes.
 >
 > **Time:** ~12 hours.
+>
+> **Before you start:** finish [Module 00](../00-setup-and-go-primer/README.md).
+> You need Go, the network tools from its §2.3, and enough Go to read the code.
 
 ---
 
@@ -409,32 +412,104 @@ does not), in the OS (`systemd-resolved`, `nscd`), in the recursive
 resolver, and in the browser. When you debug "DNS is returning the old IP",
 work out which cache is answering.
 
-**On the wire.** A DNS message is a compact binary format, usually in a
-single UDP datagram to port 53:
+**On the wire.** A DNS message is a compact binary format (RFC 1035). It
+normally travels as a single UDP datagram to port 53. Everything below is
+enough to build a working DNS client (Lab 5).
+
+All multi-byte integers are **big-endian** ("network byte order"): the most
+significant byte comes first, so the 16-bit number `0x0100` is the bytes
+`01 00`.
+
+A message has a 12-byte header, then four sections: question, answer,
+authority and additional.
+
+**Header (12 bytes):**
+
+| Bytes | Field     | Meaning |
+|-------|-----------|---------|
+| 0–1   | `ID`      | Random number chosen by the client; the reply carries the same ID |
+| 2–3   | flags     | 16 bits, from the most significant bit: `QR`(1) `Opcode`(4) `AA`(1) `TC`(1) `RD`(1) `RA`(1) `Z`(3) `RCODE`(4) |
+| 4–5   | `QDCOUNT` | number of questions (always 1 in practice) |
+| 6–7   | `ANCOUNT` | number of answer records |
+| 8–9   | `NSCOUNT` | number of authority records |
+| 10–11 | `ARCOUNT` | number of additional records |
+
+Flag meanings: `QR` 0 = query, 1 = response. `Opcode` 0 = standard query.
+`AA` authoritative answer. `TC` truncated. `RD` recursion desired (the client
+asks the resolver to do the whole walk). `RA` recursion available. `Z` must
+be zero. `RCODE` result: 0 `NOERROR`, 2 `SERVFAIL`, 3 `NXDOMAIN` (name
+doesn't exist), 5 `REFUSED`.
+
+So a query with only `RD` set has flags `0x0100`. A typical successful
+recursive response has `0x8180` (`QR`, `RD`, `RA`).
+
+**Names** are encoded as a sequence of *labels*. Each label is one length
+byte (1–63) followed by that many characters, and a zero byte ends the name:
 
 ```
-┌──────────────────────── Header (12 bytes) ────────────────────────┐
-│ ID (16 bits)   │ flags: QR, opcode, AA, TC, RD, RA, rcode          │
-│ QDCOUNT        │ ANCOUNT        │ NSCOUNT        │ ARCOUNT          │
-├──────────────────────── Question ─────────────────────────────────┤
-│ QNAME: 3 'a' 'p' 'i' 8 'g' 'a' 't' 'e' 'p' 'a' 's' 's' 4 't' 'e'   │
-│        's' 't' 0          (length-prefixed labels, then a 0 byte)  │
-│ QTYPE: 1 (A)   │ QCLASS: 1 (IN)                                    │
-├──────────────────────── Answer(s) ────────────────────────────────┤
-│ NAME (often a 2-byte pointer back to QNAME: 0xC00C)               │
-│ TYPE │ CLASS │ TTL (32 bits) │ RDLENGTH │ RDATA (4 bytes for an A) │
-└───────────────────────────────────────────────────────────────────┘
+api.gatepass.test  →  03 'a' 'p' 'i' 08 'g' 'a' 't' 'e' 'p' 'a' 's' 's' 04 't' 'e' 's' 't' 00
 ```
 
-- The client picks a random **ID** and matches the reply by it. Randomizing
-  the ID and the source port is what defends against cache-poisoning attacks.
-- `RD=1` means "recursion desired".
-- If the answer doesn't fit in the datagram, the server sets **TC**
-  (truncated) and the client retries over TCP. **EDNS(0)** lets clients
-  advertise larger UDP buffers.
-- **DoT** and **DoH** (DNS over TLS / over HTTPS) encrypt this traffic.
+**Question:** `QNAME` (an encoded name), then `QTYPE` (2 bytes) and `QCLASS`
+(2 bytes, always 1 = `IN`, Internet). Type codes: `A`=1, `NS`=2, `CNAME`=5,
+`SOA`=6, `MX`=15, `TXT`=16, `AAAA`=28, `SRV`=33, `CAA`=257.
 
-Lab 5 has you build this packet by hand.
+**Resource record** (each entry in the answer, authority and additional
+sections):
+
+| Field      | Size     | Meaning |
+|------------|----------|---------|
+| `NAME`     | variable | encoded name (often compressed, see below) |
+| `TYPE`     | 2 bytes  | type code, as above |
+| `CLASS`    | 2 bytes  | 1 = `IN` |
+| `TTL`      | 4 bytes  | seconds this record may be cached (unsigned) |
+| `RDLENGTH` | 2 bytes  | length of `RDATA` in bytes |
+| `RDATA`    | `RDLENGTH` bytes | the data: 4 bytes for `A`, 16 for `AAAA`, an encoded name for `CNAME`/`NS` |
+
+**Name compression.** Names repeat a lot in a response, so a name can end
+with a **pointer** to a name earlier in the message. A length byte whose top
+two bits are both 1 (any value `0xC0` or above) isn't a length. Together
+with the next byte it forms a 14-bit offset from the start of the message:
+`offset = (b1 & 0x3F) << 8 | b2`. The reader continues reading labels at that
+offset, and the name ends at the pointer in its original position. The
+question name always starts at offset 12, right after the header, so answers
+usually begin with `C0 0C`: "same name as the question". Pointers can chain,
+so a careful reader limits how many it follows, to survive malicious loops.
+
+**A complete example.** Query for the `A` record of `example.com`, ID
+`0xBEEF`, recursion desired (29 bytes):
+
+```
+be ef  01 00  00 01  00 00  00 00  00 00       header: ID, flags=RD, QDCOUNT=1
+07 65 78 61 6d 70 6c 65  03 63 6f 6d  00       "example" "com" end
+00 01  00 01                                   QTYPE=A, QCLASS=IN
+```
+
+A response to it, with one answer `203.0.113.7` and a TTL of 3600:
+
+```
+be ef  81 80  00 01  00 01  00 00  00 00       same ID, flags=QR|RD|RA, 1 question, 1 answer
+07 65 78 61 6d 70 6c 65  03 63 6f 6d  00  00 01 00 01    question echoed back
+c0 0c                                          NAME: pointer to offset 12 (example.com)
+00 01  00 01                                   TYPE=A, CLASS=IN
+00 00 0e 10                                    TTL = 0x0e10 = 3600 s
+00 04                                          RDLENGTH = 4
+cb 00 71 07                                    203.0.113.7
+```
+
+Practical details:
+
+- Responses over plain UDP are limited to 512 bytes. **EDNS(0)** lets the
+  client advertise a larger buffer through an extra record in the additional
+  section.
+- If the answer still doesn't fit, the server sets **TC** and the client
+  repeats the query over **TCP**, port 53. Over TCP, each message is prefixed
+  with its length as 2 bytes, because TCP has no message boundaries
+  (section 2.3): framing again.
+- Randomizing the ID and the UDP source port is what makes forging responses
+  ("cache poisoning") hard: an attacker would have to guess both.
+- **DoT** and **DoH** (DNS over TLS and over HTTPS) send these same messages
+  inside an encrypted connection.
 
 ### 3.3 HTTP/1.1 framing: where does a message end? `L3`
 
@@ -669,47 +744,361 @@ once and reuse it, so its connection pool can reuse TCP+TLS connections
 
 ## 6. Labs
 
-1. **Watch the handshake.** Start a local server and capture traffic:
-   `sudo tcpdump -i lo -n port 8099` (or Wireshark on the loopback
-   interface). Run `gpcurl` against it. Identify the SYN, SYN-ACK and ACK, the
-   request segment, the response, and the FIN/ACK exchange. Which side sends
-   the first FIN? Why? (Hint: the `Connection: close` header.)
+### Lab setup
 
-2. **Speak HTTP by hand.** Run `nc localhost 8099`, type
-   `GET / HTTP/1.1`, `Host: localhost` and an empty line. Now try:
-   no `Host` header; `HTTP/1.0` instead of `1.1`; an invalid method. Note how
-   the server responds to each.
+Most labs need a local web server and a built `gpcurl`. Open a terminal and
+start the server. It keeps running, so leave this terminal alone:
 
-3. **Follow the DNS chain.** On a machine with internet access, run
-   `dig +trace example.com` and identify the root, TLD and authoritative
-   servers. Then run `dig example.com` twice against your resolver and
-   compare the TTLs. What do you notice?
+```console
+$ mkdir -p /tmp/www && cd /tmp/www
+$ echo "hello from riverside" > index.html
+$ python3 -m http.server 8099
+Serving HTTP on 0.0.0.0 port 8099 (http://0.0.0.0:8099/) ...
+```
 
-4. **Compare with curl.** Run
-   `curl -o /dev/null -s -w 'dns %{time_namelookup} connect %{time_connect} tls %{time_appconnect} ttfb %{time_starttransfer} total %{time_total}\n' https://example.com`
-   next to `gpcurl https://example.com > /dev/null`. curl's numbers are
-   cumulative; ours are per-phase. Convert one into the other and check they
-   roughly agree. Which phase is closest to one RTT? Check with `ping`.
+`python3 -m http.server 8099` serves the current directory over HTTP on port
+8099. It speaks HTTP/1.0 and closes the connection after every response. In
+a second terminal, build `gpcurl` once:
 
-5. **Stretch, `L3` DNS: build `gpdig`.** Write a tool that builds the DNS query
-   from section 3.2 byte by byte, sends it over UDP to a resolver (`8.8.8.8:53`
-   or the one in `/etc/resolv.conf`), and prints the `A` records and TTLs
-   from the answer. Handle name compression (`0xC0` pointers). Check against
-   `dig`. Extra: if the `TC` bit is set, retry over TCP. TCP DNS prefixes each
-   message with a 2-byte length, which is another framing rule.
+```console
+$ cd backend-course/gatepass
+$ go build -o /tmp/gpcurl ./cmd/gpcurl
+$ /tmp/gpcurl http://127.0.0.1:8099/
+hello from riverside
+```
 
-6. **Exhaust ephemeral ports.** Run `gpcurl` against your local server 2,000
-   times in a loop. While it runs, count connections in `TIME_WAIT`:
-   `ss -tan state time-wait | wc -l`. Which side holds them, client or server?
-   Then calculate: at 1,000 new connections per second with a 60 s
-   `TIME_WAIT` and Linux's default port range, how long until a client runs
-   out of ports to one destination?
+Stop the server with `Ctrl+C` when you're done with the labs.
 
-7. **Feel the RTT.** Add 100 ms of delay to loopback:
-   `sudo tc qdisc add dev lo root netem delay 50ms` (50 ms each way). Rerun
-   `gpcurl` and see which phases grow, and by how much. Does it match the
-   table in section 1? Remove it afterwards with
-   `sudo tc qdisc del dev lo root`.
+---
+
+### Lab 1: Watch the handshake
+
+**Goal:** see section 3.1 happen, packet by packet.
+
+1. In a third terminal, start a packet capture on the loopback interface:
+   ```console
+   $ sudo tcpdump -i lo -n -S 'tcp port 8099'
+   ```
+   - `-i lo`: capture on the loopback interface (macOS: `-i lo0`).
+   - `-n`: print addresses as numbers instead of looking up names.
+   - `-S`: print absolute sequence numbers, so you can do the arithmetic.
+   - `'tcp port 8099'`: a filter, so you only see our traffic.
+2. In the second terminal run `/tmp/gpcurl http://127.0.0.1:8099/`.
+3. Stop tcpdump with `Ctrl+C`.
+
+**What you should see** (TCP options trimmed; your ports, sequence numbers and
+times will differ):
+
+```
+IP 127.0.0.1.33578 > 127.0.0.1.8099: Flags [S],  seq 908084557, length 0
+IP 127.0.0.1.8099 > 127.0.0.1.33578: Flags [S.], seq 2127422235, ack 908084558, length 0
+IP 127.0.0.1.33578 > 127.0.0.1.8099: Flags [.],  ack 2127422236, length 0
+IP 127.0.0.1.33578 > 127.0.0.1.8099: Flags [P.], seq 908084558:908084654, ack 2127422236, length 96
+IP 127.0.0.1.8099 > 127.0.0.1.33578: Flags [.],  ack 908084654, length 0
+IP 127.0.0.1.8099 > 127.0.0.1.33578: Flags [P.], seq 2127422236:2127422422, ack 908084654, length 186
+IP 127.0.0.1.33578 > 127.0.0.1.8099: Flags [.],  ack 2127422422, length 0
+IP 127.0.0.1.8099 > 127.0.0.1.33578: Flags [P.], seq 2127422422:2127422443, ack 908084654, length 21
+IP 127.0.0.1.33578 > 127.0.0.1.8099: Flags [.],  ack 2127422443, length 0
+IP 127.0.0.1.8099 > 127.0.0.1.33578: Flags [F.], seq 2127422443, ack 908084654, length 0
+IP 127.0.0.1.33578 > 127.0.0.1.8099: Flags [F.], seq 908084654, ack 2127422444, length 0
+IP 127.0.0.1.8099 > 127.0.0.1.33578: Flags [.],  ack 908084655, length 0
+```
+
+How to read it. `Flags` shows the TCP flags: `S` = SYN, `F` = FIN,
+`R` = RST, `P` = PSH ("deliver this to the application now"), and `.` = ACK.
+So `[S.]` is SYN+ACK. `seq a:b` covers bytes `a` up to (not including) `b`.
+
+- Lines 1–3 are the **three-way handshake**. The server's `ack 908084558` is
+  the client's `seq + 1`: a SYN counts as one byte.
+- Line 4 is our request: **96 bytes**. Count it from `buildRequest`'s output:
+  16 + 22 + 24 + 13 + 19 + 2 bytes for the six lines, CRLFs included.
+- Lines 6 and 8 are the response headers (186 bytes) and the body (21 bytes,
+  `hello from riverside\n`). Python writes them separately, so they travel in
+  two segments.
+- Lines 10–12 close the connection, one direction at a time.
+
+**Questions:**
+
+<details>
+<summary>Which side sent the first FIN, and why?</summary>
+
+The server (line 10). It speaks HTTP/1.0 and we sent `Connection: close`, so
+it closes once the response is written. The side that closes first goes into
+`TIME_WAIT` (section 3.1), so here that's the server. Lab 6 confirms it.
+</details>
+
+<details>
+<summary>Why are there separate ACK-only segments (length 0)?</summary>
+
+Each side acknowledges data it received. When the receiver has nothing to
+send right away, the ACK goes out on its own. Delayed ACK (section 3.1) tries
+to combine ACKs with data, but here both sides are fast enough that
+standalone ACKs appear.
+</details>
+
+<details>
+<summary>The SYN's options include <code>mss 65495</code>. Why so large?</summary>
+
+MSS follows the interface's maximum packet size (MTU). Loopback's MTU is
+65,536 bytes; Ethernet's is 1,500, which gives an MSS of 1,460. On a real
+network you would see 1460 or less.
+</details>
+
+---
+
+### Lab 2: Speak HTTP by hand
+
+**Goal:** see that HTTP/1.1 is just text, and how a server reacts to bad input.
+
+`nc` (netcat) opens a TCP connection and copies your keyboard to it and the
+reply to your screen. `printf` lets us send exact bytes, including `\r\n`:
+
+```console
+$ printf 'GET / HTTP/1.1\r\nHost: localhost\r\n\r\n' | nc 127.0.0.1 8099
+HTTP/1.0 200 OK
+Server: SimpleHTTP/0.6 Python/3.13.16
+Date: Tue, 20 Oct 2026 17:17:10 GMT
+Content-type: text/html
+Content-Length: 21
+Last-Modified: Tue, 20 Oct 2026 17:17:06 GMT
+
+hello from riverside
+```
+
+Now send each of these and look at the first line of the reply:
+
+| Send                                              | Python's reply                          |
+|---------------------------------------------------|-----------------------------------------|
+| `'GET / HTTP/1.1\r\n\r\n'` (no `Host`)            | `HTTP/1.0 200 OK`                       |
+| `'GET / HTTP/1.0\r\n\r\n'`                        | `HTTP/1.0 200 OK`                       |
+| `'FOO / HTTP/1.1\r\nHost: x\r\n\r\n'`             | `HTTP/1.0 501 Unsupported method ('FOO')` |
+| `'GET /nope HTTP/1.1\r\nHost: x\r\n\r\n'`         | `HTTP/1.0 404 File not found`           |
+| `'hello\r\n\r\n'`                                 | `HTTP/1.0 400 Bad request syntax ('hello')` |
+
+<details>
+<summary>The first row is a bug in Python's server. Why?</summary>
+
+HTTP/1.1 requires a `Host` header, and RFC 9112 says a server *must* answer
+`400 Bad Request` when it is missing. Python's development server is lenient.
+Go's `net/http` and nginx both reject it with 400. Leniency like this is
+exactly what request smuggling exploits (section 3.3), which is why the
+server we build in Module 05 will be strict.
+</details>
+
+<details>
+<summary>Why does the server answer <code>HTTP/1.0</code> when we asked in 1.1?</summary>
+
+A server replies with the highest version it supports, up to the client's.
+Python's simple server only implements 1.0, so it answers in 1.0, which also
+means it closes the connection after each response.
+</details>
+
+---
+
+### Lab 3: Follow the DNS chain
+
+**Goal:** watch a recursive lookup (section 3.2). Needs internet access.
+
+```console
+$ dig +trace example.com
+```
+
+`dig` sends DNS queries and prints the answers in a readable form. `+trace`
+makes `dig` do the recursion itself, starting at the root, instead of asking
+your resolver. The output comes in four blocks, roughly:
+
+```
+.                       518400  IN  NS  a.root-servers.net.     ← from your resolver: who are the roots
+...
+com.                    172800  IN  NS  a.gtld-servers.net.     ← a root server: "ask the .com servers"
+...
+example.com.            172800  IN  NS  a.iana-servers.net.     ← a .com server: "ask example.com's servers"
+...
+example.com.            3600    IN  A   <address>               ← the authoritative answer
+```
+
+Each line is one record: name, TTL in seconds, class, type, data. The
+comment line under each block (`;; Received 525 bytes from 198.41.0.4#53(a.root-servers.net)`)
+says which server answered.
+
+Now ask your normal resolver twice, a few seconds apart:
+
+```console
+$ dig example.com A +noall +answer
+example.com.    3600    IN  A   <address>
+$ dig example.com A +noall +answer
+example.com.    3593    IN  A   <address>
+```
+
+(`+noall +answer` prints only the answer section.)
+
+<details>
+<summary>Why did the TTL go down between the two queries?</summary>
+
+The second answer came from the resolver's cache. The resolver counts the
+TTL down while it caches the record, so you see how long it has left. When
+it reaches 0, the resolver asks the authoritative server again. If the first
+TTL was already below the record's real TTL, someone else had recently asked
+your resolver the same question.
+</details>
+
+---
+
+### Lab 4: Compare with curl
+
+**Goal:** check `gpcurl`'s timings against an independent tool.
+
+curl can print timings with `-w` (write-out):
+
+```console
+$ curl -o /dev/null -s -w 'dns %{time_namelookup} connect %{time_connect} tls %{time_appconnect} ttfb %{time_starttransfer} total %{time_total}\n' https://example.com
+$ /tmp/gpcurl https://example.com > /dev/null
+```
+
+- `-o /dev/null`: throw the body away. `-s`: silent, no progress bar.
+- curl's numbers are **cumulative seconds since the start**: `connect` is
+  "DNS + TCP". gpcurl's are **per phase**.
+
+To compare: gpcurl's *TCP connect* ≈ curl's `connect − dns`; *TLS handshake*
+≈ `tls − connect`; *Server (TTFB)* ≈ `ttfb − tls`.
+
+Then run `ping -c 5 example.com` and compare its average RTT with the
+connect phase.
+
+<details>
+<summary>Which phase should be closest to one RTT, and why?</summary>
+
+TCP connect: it's exactly one round trip (SYN out, SYN-ACK back). The TLS 1.3
+handshake is also about one RTT plus some cryptography time. TTFB is one RTT
+plus however long the server takes. Without internet access, run both tools
+against `http://127.0.0.1:8099/`. The RTT is then a few microseconds, and
+the phases mostly show local processing time.
+</details>
+
+---
+
+### Lab 5 (stretch, `L3` DNS): build `gpdig`
+
+**Goal:** a DNS client written from the wire format, with no DNS library.
+Section 3.2 contains everything you need.
+
+Work in a scratch module, outside `gatepass/`:
+
+```console
+$ mkdir -p ~/goplay/gpdig && cd ~/goplay/gpdig && go mod init gpdig
+```
+
+Suggested steps:
+
+1. **`buildQuery(id uint16, name string, qtype uint16) []byte`.** Write the
+   header with `binary.BigEndian.PutUint16` (package `encoding/binary`), then
+   the encoded name, then `QTYPE` and `QCLASS`. **Test it:** for
+   `0xBEEF, "example.com", 1` it must return exactly the 29 query bytes from
+   section 3.2.
+2. **`readName(msg []byte, off int) (name string, next int, err error)`.**
+   Read labels from `off`. On a byte `>= 0xC0`, follow the pointer, and
+   remember that `next` is the position right after the 2-byte pointer, not
+   wherever the pointer led. Give up after, say, 10 pointers.
+   Return an error rather than reading past the end of `msg`.
+3. **`parseResponse(msg []byte) ([]Answer, error)`.** Check the ID matches and
+   `QR` is set, read `RCODE` (`flags & 0x000F`), skip the question (a name,
+   then 4 bytes), then read `ANCOUNT` records. For type 1, `RDATA` is the
+   IPv4 address (`net.IP(rdata).String()`). **Test it** with the
+   response bytes from section 3.2: you should get one answer,
+   `203.0.113.7`, TTL 3600.
+4. **Send it.** Find your resolver with `grep nameserver /etc/resolv.conf`,
+   then:
+   ```go
+   conn, err := net.Dial("udp", "RESOLVER_IP:53") // a UDP "connection" just fixes the peer address
+   conn.SetDeadline(time.Now().Add(3 * time.Second))
+   conn.Write(query)
+   buf := make([]byte, 512)
+   n, err := conn.Read(buf) // one datagram = one whole DNS message
+   ```
+   Pick the ID with `uint16(rand.Uint32())` (package `math/rand/v2`).
+5. Compare your output with `dig example.com A +noall +answer`.
+
+**Extensions:** support `AAAA` (type 28, 16-byte address) and `CNAME`
+(type 5, `RDATA` is a possibly-compressed name, so use `readName`). If `TC`
+(`flags & 0x0200`) is set, retry over TCP with the 2-byte length prefix.
+Print `NXDOMAIN` when `RCODE` is 3.
+
+---
+
+### Lab 6: Exhaust ephemeral ports (Linux)
+
+**Goal:** see `TIME_WAIT` pile up (section 3.1).
+
+With the lab server running:
+
+```console
+$ for i in $(seq 2000); do /tmp/gpcurl http://127.0.0.1:8099/ >/dev/null 2>&1; done
+$ ss -tan state time-wait | head -3
+Recv-Q Send-Q Local Address:Port   Peer Address:Port
+0      0          127.0.0.1:8099      127.0.0.1:34684
+0      0          127.0.0.1:8099      127.0.0.1:34000
+$ ss -tan state time-wait | wc -l
+2001              ← about one per request, plus the header line
+```
+
+`ss` lists sockets: `-t` TCP only, `-a` all states, `-n` numeric. `state
+time-wait` filters by state. The count includes one header line. (macOS:
+`netstat -an -p tcp | grep TIME_WAIT | wc -l`.) Wait 60 seconds and count
+again: they're gone.
+
+<details>
+<summary>Which side holds the TIME_WAIT sockets here? Would it be the same against a real HTTP/1.1 server?</summary>
+
+The server: the local address is `127.0.0.1:8099`, because Python closes
+first (Lab 1). A keep-alive HTTP/1.1 server usually waits for the client to
+close, and then the *client* collects `TIME_WAIT` sockets. That's the
+dangerous case, because the client is the one that needs ephemeral ports.
+</details>
+
+<details>
+<summary>At 1,000 new connections per second to one server, how long until the client runs out of ports?</summary>
+
+Linux's default range 32768–60999 holds 28,232 ports. Each closed connection
+keeps its port in `TIME_WAIT` for 60 s, so at most 28,232 / 60 ≈ 470 new
+connections per second can be sustained to one destination IP and port. At
+1,000 per second the ports run out after about 28 seconds, and connects
+start failing with `EADDRNOTAVAIL`. Fixes, from best to worst: reuse
+connections (a connection pool), spread over more destination addresses, and
+widen the port range. Linux can also reuse `TIME_WAIT` ports for outgoing
+connections when TCP timestamps are on (`net.ipv4.tcp_tw_reuse`), but that
+only treats the symptom.
+</details>
+
+---
+
+### Lab 7: Feel the RTT (Linux)
+
+**Goal:** check the round-trip table from section 1 by adding latency.
+
+`tc` (traffic control) can delay every packet on an interface with the
+`netem` (network emulator) module. Every packet on loopback crosses it once,
+so a 50 ms delay makes the RTT 100 ms:
+
+```console
+$ sudo tc qdisc add dev lo root netem delay 50ms
+$ /tmp/gpcurl http://127.0.0.1:8099/ > /dev/null
+$ sudo tc qdisc del dev lo root          # always remove it afterwards
+```
+
+(If you get `Specified qdisc kind is unknown`, your kernel lacks the
+`netem` module. Some container and WSL kernels do. Try
+`sudo modprobe sch_netem`, or use a full Linux VM.)
+
+<details>
+<summary>What should the timings show?</summary>
+
+No DNS phase (an IP literal). *TCP connect* ≈ 100 ms: one RTT. *Server
+(TTFB)* ≈ 100 ms: one RTT for the request to arrive and the response to come
+back. *Content* close to 0, because the body follows the headers right away
+and both are delayed by the same 50 ms. Total ≈ 200 ms: two round trips
+for plain HTTP. With https, add another ≈100 ms for the TLS handshake,
+matching section 1's table.
+</details>
 
 ---
 
@@ -736,39 +1125,125 @@ $ cd gatepass && go vet ./... && go test -race ./...
 
 - Add `-I` (send `HEAD`, print headers only). Check the parser handles a
   `Content-Length` with no body.
-- Add redirect following (`-L`) for `301/302/307/308`, with a limit of 10.
-  Which status codes must keep the method and body?
+- Add redirect following (`-L`) for `301/302/303/307/308`, with a limit of
+  10. The new URL is in the `Location` header and may be relative: resolve it
+  against the current URL with `u.ResolveReference(loc)`. Method rules:
+  `307` and `308` must repeat the same method and body. `303` always switches
+  to `GET` without a body. `301` and `302` should keep the method, but for
+  historical reasons every real client turns a `POST` into a `GET`, so do
+  the same. (Module 05 covers status codes in full.)
 - Try every resolved address in turn if connecting to the first one fails.
 
 ---
 
 ## 8. Checkpoint
 
-You're ready to move on when you can answer these without notes:
+You're ready to move on when you can answer these without notes. Answer
+first, then open the answer to check.
 
-1. List the round trips needed to fetch a page over a brand-new HTTPS
-   connection with TLS 1.3. How many does a reused connection need?
-2. What identifies a TCP connection? How can one server port serve a million
-   clients?
-3. Why does every protocol on top of TCP need its own framing rules?
-4. Give the four HTTP/1.1 rules for finding the end of a response body, in
-   order. What attack happens when two servers apply them differently?
-5. What's the difference between flow control and congestion control? Which
-   one stalls a sender when the receiving application reads slowly?
-6. Why is a fresh TCP connection slower than a warm one even after the
-   handshake?
-7. What is `TIME_WAIT` for, which side ends up in it, and how can it break a
-   busy client?
-8. You change Gatepass's `A` record but some users still reach the old server
-   an hour later. List three caches that could be responsible.
-9. What problem does HTTP/2 solve that HTTP/1.1 keep-alive doesn't? What
-   problem does HTTP/2 introduce that HTTP/3 solves?
-10. What do SNI and ALPN tell the server, and why must they be sent before
-    encryption starts?
+<details>
+<summary>1. List the round trips needed to fetch a page over a brand-new HTTPS connection with TLS 1.3. How many does a reused connection need?</summary>
+
+DNS (one to the resolver, if not cached), one for the TCP handshake, one for
+TLS 1.3, one for the request and response: about 4 round trips, about 3 if
+DNS is cached. A reused connection needs only the request round trip:
+one. (Section 1.)
+</details>
+
+<details>
+<summary>2. What identifies a TCP connection? How can one server port serve a million clients?</summary>
+
+The 5-tuple: protocol, source IP, source port, destination IP, destination
+port. All connections to `:443` share the destination half but differ in the
+client's IP or ephemeral port, so each is distinct. The real limits are
+memory and file descriptors (Module 02), not ports. (Section 2.3.)
+</details>
+
+<details>
+<summary>3. Why does every protocol on top of TCP need its own framing rules?</summary>
+
+TCP delivers a byte stream, not messages. One write may arrive in pieces or
+merged with the next, so the receiver needs rules (a length prefix, a
+delimiter, chunking) to find where each message ends. (Section 2.3.)
+</details>
+
+<details>
+<summary>4. Give the four HTTP/1.1 rules for finding the end of a response body, in order. What attack happens when two servers apply them differently?</summary>
+
+(1) `HEAD` responses and `1xx`/`204`/`304` have no body. (2)
+`Transfer-Encoding: chunked`: read chunks until the zero-size one; this wins
+over `Content-Length`. (3) `Content-Length: N`: read exactly N bytes. (4)
+Otherwise, read until the connection closes. If a proxy and a backend
+disagree, an attacker can hide a second request inside the first one's body:
+HTTP request smuggling. (Section 3.3.)
+</details>
+
+<details>
+<summary>5. What's the difference between flow control and congestion control? Which one stalls a sender when the receiving application reads slowly?</summary>
+
+Flow control protects the receiver: the receive window `rwnd` says how much
+buffer space is left. Congestion control protects the network: the
+congestion window `cwnd` grows and shrinks with observed loss. A slowly
+reading application fills its receive buffer, `rwnd` drops to zero, and
+flow control stalls the sender. (Section 3.1.)
+</details>
+
+<details>
+<summary>6. Why is a fresh TCP connection slower than a warm one even after the handshake?</summary>
+
+Slow start: a new connection begins with a small congestion window (about
+14 KB) and doubles it every RTT, so a large response needs several round
+trips before it reaches full speed. A warm connection already has a large
+`cwnd`. (Section 3.1.)
+</details>
+
+<details>
+<summary>7. What is <code>TIME_WAIT</code> for, which side ends up in it, and how can it break a busy client?</summary>
+
+It keeps a closed connection's 5-tuple reserved for about 60 s, so that
+delayed packets from the old connection can't be mistaken for a new one.
+The side that closes first enters it. A client that opens and closes many
+connections to one server keeps every port in `TIME_WAIT`, runs out of
+ephemeral ports, and new connects fail with `EADDRNOTAVAIL`. The fix is
+connection reuse. (Section 3.1, Lab 6.)
+</details>
+
+<details>
+<summary>8. You change Gatepass's <code>A</code> record but some users still reach the old server an hour later. List three caches that could be responsible.</summary>
+
+The recursive resolver (ISP, `8.8.8.8`) holding the record until its TTL
+expires; the operating system's cache (`systemd-resolved`, `nscd`); the
+browser's or application runtime's own DNS cache. Also long-lived
+connections, which don't look DNS up again at all. Lowering the TTL a day
+before the change is the prevention. (Section 2.4, §3.2.)
+</details>
+
+<details>
+<summary>9. What problem does HTTP/2 solve that HTTP/1.1 keep-alive doesn't? What problem does HTTP/2 introduce that HTTP/3 solves?</summary>
+
+HTTP/1.1 allows one request in flight per connection, so a slow response
+blocks the rest (head-of-line blocking at the HTTP level). HTTP/2 runs many
+streams over one connection. But on one TCP connection a single lost packet
+stalls every stream until it's retransmitted (head-of-line blocking at the
+TCP level). HTTP/3 runs over QUIC, whose streams are independent, so a loss
+only stalls its own stream. (Sections 3.3, 3.4.)
+</details>
+
+<details>
+<summary>10. What do SNI and ALPN tell the server, and why must they be sent before encryption starts?</summary>
+
+SNI names the hostname the client wants. ALPN lists the application
+protocols it speaks (`h2`, `http/1.1`). The server needs both to pick the
+right certificate and protocol, and it must do that during the handshake,
+before any keys exist. That's why they're sent in the clear, in the first
+handshake message. (Section 2.6.)
+</details>
 
 ---
 
-## 9. Further reading
+## 9. Further reading (optional)
+
+Everything you need is above. These go deeper:
 
 - Kurose & Ross, *Computer Networking: A Top-Down Approach*, chapters 2–3.
 - Ilya Grigorik, [*High Performance Browser Networking*](https://hpbn.co/),

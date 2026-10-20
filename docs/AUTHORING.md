@@ -31,18 +31,22 @@ Follow the module template below and the rules after it.
 ### After writing
 
 1. `cd gatepass && gofmt -l . && go vet ./... && go test -race ./...` passes,
-   with no files listed by `gofmt`.
-2. Update `LEDGER.md`:
+   with no files listed by `gofmt`. Code samples in the lesson that aren't
+   in `gatepass/` (primer snippets, lab solutions) were compiled and run once.
+2. **Self-containment pass:** read the module as a learner with no internet.
+   Every lab and question can be completed and checked from the course
+   alone (see the writing rules).
+3. Update `LEDGER.md`:
    - module status and a short summary,
    - new terms, with the module and section that define them,
    - promises fulfilled (close them) and new promises made (open them),
    - code state: packages, commands and key types now in `gatepass/`,
    - decisions and conventions introduced,
    - any deviation from `SYLLABUS.md` or `PROJECT.md`.
-3. If the module deviates from the plan, update `SYLLABUS.md`,
+4. If the module deviates from the plan, update `SYLLABUS.md`,
    `PROJECT.md` and `README.md` in the **same commit** so the plan always
    matches reality.
-4. Commit as `Module NN: <title>`.
+5. Commit as `Module NN: <title>`.
 
 ## Module template
 
@@ -60,14 +64,32 @@ File: `modules/NN-slug/README.md`.
 ## 3. Under the hood        protocol bytes, data structures, algorithms (L3 material)
 ## 4. Build it              walk through the reference code in gatepass/
 ## 5. Across languages      the same idea in Python, TS/Node, Java/Kotlin, C#, Rust
-## 6. Labs                  exercises; at least one per L3 sub-section
+## 6. Labs                  "Lab setup" block, then step-by-step labs with "What you
+                            should see" and answered questions; at least one per L3 sub-section
 ## 7. Project milestone     Delivered checklist, acceptance command, extension tasks
-## 8. Checkpoint            ~10 questions answerable without notes
-## 9. Further reading       short and curated
+                            (with the knowledge they need included)
+## 8. Checkpoint            ~10 questions, each with a <details> answer pointing to its section
+## 9. Further reading (optional)   short and curated; never required
 ```
 
 ## Writing rules
 
+- **Self-contained.** A reader must be able to finish the module, including
+  every lab, checkpoint and extension task, using only the course. External
+  sources may be listed in *Further reading (optional)*, never required.
+  In particular:
+  - every concept, protocol detail, format or algorithm a lab needs is
+    explained in the module (or an earlier one listed in the ledger);
+  - every tool is installed in Module 00 §2.3 (add new tools to that table)
+    or in a "Lab setup" block, and every flag used is explained;
+  - every lab says **what you should see**, using real output captured by
+    running it (trim it, and say when values will differ). If a lab can't be
+    run while authoring, give the expected result worked out from theory
+    and say so;
+  - every question in a lab or checkpoint has an answer in a collapsible
+    `<details>` block;
+  - language features beyond what's already taught (Module 00 primer, then
+    Module 03) are explained where first used.
 - **Respect the depth tags.** `L3` means the learner could rebuild it: show
   the bytes, the algorithm, the failure modes. `L1` means a paragraph or a
   table of trade-offs, no more. Don't let `L1` topics grow.
@@ -95,6 +117,7 @@ File: `modules/NN-slug/README.md`.
 - Comments explain *why*, at the same density as the existing code.
 - Errors are wrapped with `%w` and say which step failed.
 - Tests are table-driven where there are several cases; run with `-race`.
-- Lab solutions are not committed. Only milestone code is. "Extension tasks"
+- Lab solutions are not committed as code files. Only milestone code is.
+  Short solutions and answers go in `<details>` blocks in the lesson. "Extension tasks"
   in section 7 are for the learner and stay out of the reference code
   unless a later module needs them (then the ledger says so).

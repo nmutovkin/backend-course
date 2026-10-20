@@ -4,7 +4,7 @@ Every module lists its **topics** (grouped into numbered sub-sections),
 its **labs**, an **Across languages** note, and its **Gatepass milestone**.
 Full milestone specs with acceptance criteria are in [`PROJECT.md`](./PROJECT.md).
 
-Estimated effort: ~450 hours total. Each module takes 8–20 hours.
+Estimated effort: ~450 hours total. Each module takes 8–20 hours (Module 00: ~4).
 
 ## Depth levels
 
@@ -29,6 +29,29 @@ clusters as an admin; cloud certification detail.
 ---
 
 # Part I: Foundations
+
+## 00. Setup & Go Primer
+
+**Goal:** a working environment, and enough Go to read and change the code in Modules 01–02.
+
+1. **Environment** `L2`
+   - OS choice (Linux, WSL2, macOS + Linux container), minimal terminal usage
+   - Installing Git, Go, Python 3, network/system tools, an editor, Docker (needed from Module 07)
+   - Cloning the course and running the Gatepass tests
+2. **Go primer** `L2`
+   - Programs, modules, packages, imports; variables, types, zero values
+   - Slices, maps, structs; exported vs unexported names
+   - Functions, multiple results, errors and wrapping (`%w`, `errors.Is`)
+   - Pointers, methods, interfaces; `io.Reader`/`io.Writer`; `defer`
+   - `context.Context` (timeouts), table-driven tests, everyday `go` tooling
+
+**Labs:** compiler errors for unused code; `%w` vs `%v`; a custom `io.Writer`; exploring the course code with `go doc` and `go test -v`.
+
+**Across languages:** Go constructs mapped to Python, TypeScript, Java/Kotlin, C#, Rust.
+
+**Milestone:** none. Setup verified by running the Gatepass tests; a small `seatcount` program with a table-driven test.
+
+---
 
 ## 01. How the Internet Works
 
